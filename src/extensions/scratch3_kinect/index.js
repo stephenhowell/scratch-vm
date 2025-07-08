@@ -70,6 +70,8 @@ class Scratch3PoseLandmarkBlocks {
     _handleIncomingData(dataString) {
         try {
             const data = JSON.parse(dataString);
+            // Debugging output for incoming data
+            // console.log('PoseLandmarkBlocks: Received data:', data);
             
             // Fast path for body data (most common)
             if (data.type === 'body') {
@@ -262,19 +264,15 @@ class Scratch3PoseLandmarkBlocks {
             return;
         }
         
-        console.log('Android: Setting up IPC listeners');
-        
         // Listen for Android device data
-        window.electronAPI.android.onData((event, dataString) => {
-            console.log('Android: Received data via IPC');
+        window.electronAPI.onPoseData((event, dataString) => {            
             this._handleIncomingData(dataString);
         });
         
-        // Listen for Android connection status
-        window.electronAPI.android.onConnectionStatus((event, status) => {
-            console.log('Android: Connection status update:', status);
-            this.androidConnectionStatus = status.connected;
-            this.androidClientCount = status.clientCount;
+        window.electronAPI.onPoseConnectionStatus(status => {
+            console.log('Android: Connection status update received:', status);
+            this.androidConnectionStatus = status.connected;        
+            this.androidClientCount = status.count; 
         });
     }
 
@@ -284,9 +282,8 @@ class Scratch3PoseLandmarkBlocks {
      */
     _hasAndroidAPI() {
         return typeof window !== 'undefined' && 
-               window.electronAPI && 
-               window.electronAPI.android &&
-               window.electronAPI.isElectron;
+           window.electronAPI && 
+           window.electronAPI.isElectron;
     }
 
     /**
@@ -301,7 +298,7 @@ class Scratch3PoseLandmarkBlocks {
         console.log('Android: Starting server...');
         
         try {
-            const result = await window.electronAPI.android.startServer();
+            const result = await window.electronAPI.startPoseServer();
             console.log(`Android: ${result.message}`);
         } catch (error) {
             console.error('Android: Server start error:', error);
@@ -309,72 +306,34 @@ class Scratch3PoseLandmarkBlocks {
     }
 
     /**
-     * Start Android WebSocket server and wait until a client connects
-     * @returns {Promise} Promise that resolves when at least one Android device connects
+     * Starts the Android WebSocket server and waits for a client to connect.
+     * This is a blocking block that returns a Promise.
+     * @returns {Promise} A Promise that resolves when a client connects.
      */
-    async startAndroidServerAndWait() {
+    startAndroidServerAndWait() {
+        // First, check if the API is available.
         if (!this._hasAndroidAPI()) {
-            console.log('Android: Server not available (not in Electron)');
-            throw new Error('Android server not available');
+            console.warn('Android: Electron API not available.');
+            return Promise.resolve();
         }
-        
-        console.log('Android: Starting server and waiting for phone to connect...');
-        this.isWaitingForPhone = true;
-        
-        try {
-            // Start the server
-            const result = await window.electronAPI.android.startServer();
-            if (!result.success) {
-                this.isWaitingForPhone = false;
-                throw new Error(result.message);
-            }
-            
-            console.log('✅ Android: Server started, waiting for phone connection...');
-            
-            // Wait for client connection - NO TIMEOUT!
-            return new Promise((resolve) => {
-                let statusCount = 0;
+        console.log('🚀 Android: Starting server and waiting for a phone to connect...');
+        console.log('💡 Tip: Start the Android app and connect to this computer.');
+
+        // 1. Tell the main process to start the server.
+        // This is "fire-and-forget"; we don't need to wait for the result here.
+        this.runtime.electronAPI.startPoseServer();
+
+        // 2. Return a new Promise. Scratch will pause the script here.
+        return new Promise(resolve => {
+            // 3. Use the dedicated one-time listener we created in preload.js.
+            this.runtime.electronAPI.onPoseClientConnected(() => {
+                console.log('✅ Android: Phone connected! Resuming Scratch script.');
                 
-                const checkConnection = () => {
-                    statusCount++;
-                    
-                    if (this.isAndroidConnected()) {
-                        console.log(`✅ Android: Phone connected! (${this.androidClientCount} device(s))`);
-                        this.isWaitingForPhone = false;
-                        resolve();
-                        return;
-                    }
-                    
-                    // Show helpful status messages every 5 seconds
-                    if (statusCount % 5 === 1) {
-                        console.log('⏳ Android: Waiting for phone to connect...');
-                        console.log('💡 Tip: Start the Android app and connect to this computer');
-                        
-                        // Get IP address for user
-                        if (window.electronAPI && window.electronAPI.getAppInfo) {
-                            window.electronAPI.getAppInfo().then(info => {
-                                if (info.ipAddress) {
-                                    console.log(`🌐 Your computer's IP: ${info.ipAddress}:8182`);
-                                }
-                            }).catch(() => {
-                                console.log('🌐 Server running on port 8182');
-                            });
-                        }
-                    }
-                    
-                    // Check again in 1 second
-                    setTimeout(checkConnection, 1000);
-                };
-                
-                // Start checking immediately
-                checkConnection();
+                // 4. When the main process tells us a client has connected,
+                // we resolve the promise. This tells the Scratch VM to continue.
+                resolve();
             });
-            
-        } catch (error) {
-            this.isWaitingForPhone = false;
-            console.error('Android: Failed to start server:', error);
-            throw error;
-        }
+        });
     }
 
     /**
@@ -382,7 +341,8 @@ class Scratch3PoseLandmarkBlocks {
      * @returns {boolean}
      */
     isAndroidConnected() {
-        return this.androidConnectionStatus && this.androidClientCount > 0;
+        return this.androidConnectionStatus;
+         //&& this.androidClientCount > 0;
     }
 
     // ====================================================================
@@ -405,6 +365,14 @@ class Scratch3PoseLandmarkBlocks {
             blocks: [
                 // === CONNECTION BLOCKS ===
                 {
+                    opcode: 'isConnected',
+                    blockType: BlockType.BOOLEAN,
+                    text: '[DEVICE] is connected?',
+                    arguments: {
+                        DEVICE: { type: ArgumentType.STRING, menu: 'devices', defaultValue: 'phone' }
+                    }
+                },
+                {
                     opcode: 'startConnection',
                     blockType: BlockType.COMMAND,
                     text: 'start [DEVICE] connection',
@@ -421,15 +389,15 @@ class Scratch3PoseLandmarkBlocks {
                     }
                 },
                 {
-                    opcode: 'resetConnections',
-                    blockType: BlockType.COMMAND,
-                    text: 'reset all connections'
+                    opcode: 'stopConnection',
+                    blockType: BlockType.COMMAND,   
+                    text: 'stop connection'
                 },
-                {
-                    opcode: 'getConnectionStatus',
-                    blockType: BlockType.REPORTER,
-                    text: 'what is connected'
-                },
+                // {
+                //     opcode: 'getConnectionStatus',
+                //     blockType: BlockType.REPORTER,
+                //     text: 'what is connected'
+                // },
                 
                 // === BODY POSITION BLOCKS ===
                 {
@@ -469,19 +437,19 @@ class Scratch3PoseLandmarkBlocks {
                     text: 'number of tracked people'
                 },
                 
-                // === CONNECTION STATUS BLOCKS ===
-                {
-                    opcode: 'isKinectConnected',
-                    blockType: BlockType.BOOLEAN,
-                    text: 'Kinect camera is connected?'
-                },
-                {
-                    opcode: 'isAndroidConnected',
-                    blockType: BlockType.BOOLEAN,
-                    text: 'phone is connected?'
-                }
+                // === CONNECTION STATUS BLOCKS === Deprecated
+                // {
+                //     opcode: 'isKinectConnected',
+                //     blockType: BlockType.BOOLEAN,
+                //     text: 'Kinect camera is connected?'
+                // },
+                // {
+                //     opcode: 'isAndroidConnected',
+                //     blockType: BlockType.BOOLEAN,
+                //     text: 'phone is connected?'
+                // }
             ],
-            menus: {
+            menus: { 
                 devices: {
                     acceptReporters: true,
                     items: [
@@ -576,6 +544,11 @@ class Scratch3PoseLandmarkBlocks {
      * @returns {Promise} Promise that resolves when connected and ready
      */
     async startConnectionAndWait(args) {
+        
+        // console.log('getValue - window exists:', typeof window);
+        // console.log('getValue - electronAPI exists:', typeof window.electronAPI);
+        // console.log('getValue - runtime electronAPI:', typeof this.runtime.electronAPI);
+
         console.log(`🚀 Starting ${args.DEVICE} connection and waiting...`);
         console.log('💡 Press the red stop button to cancel if needed');
         
@@ -596,6 +569,19 @@ class Scratch3PoseLandmarkBlocks {
             console.log('💡 Check the console for details, then try again');
             // Don't re-throw - let user try again rather than breaking script
         }
+    }
+
+    
+    stopConnection() {
+        // Disconnect from Kinect if it's connected
+        this.disconnectKinect();
+
+        // Tell the main process to close the phone client socket
+        if (this._hasAndroidAPI()) {
+            window.electronAPI.stopPoseClient();
+        }
+        // Immediately update the extension's internal state
+        this.androidConnectionStatus = false; 
     }
 
     /**
@@ -664,27 +650,36 @@ class Scratch3PoseLandmarkBlocks {
      * Get connection status description  
      * @returns {string}
      */
-    getConnectionStatus() {
-        const kinect = this.isKinectConnected();
-        const android = this.isAndroidConnected();
+    // getConnectionStatus() {
+    //     const kinect = this.isKinectConnected();
+    //     const android = this.isAndroidConnected();
         
-        // Check for connecting/waiting states
-        if (this.kinectConnectionStatus === 1) {
-            return 'connecting to Kinect...';
-        }
-        if (this.kinectConnectionStatus === 2 && !kinect) {
-            return 'waiting for Kinect data...';
-        }
-        if (this.isWaitingForPhone) {
-            return 'waiting for phone...';
-        }
+    //     // Check for connecting/waiting states
+    //     if (this.kinectConnectionStatus === 1) {
+    //         return 'connecting to Kinect...';
+    //     }
+    //     if (this.kinectConnectionStatus === 2 && !kinect) {
+    //         return 'waiting for Kinect data...';
+    //     }
+    //     if (this.isWaitingForPhone) {
+    //         return 'waiting for phone...';
+    //     }
         
-        // Show actual connections
-        if (kinect && android) return 'Kinect camera and phone';
-        if (kinect) return 'Kinect camera';
-        if (android) return `phone (${this.androidClientCount})`;
+    //     // Show actual connections
+    //     if (kinect && android) return 'Kinect camera and phone';
+    //     if (kinect) return 'Kinect camera';
+    //     if (android) return `phone (${this.androidClientCount})`;
         
-        return 'nothing';
+    //     return 'nothing';
+    // }
+
+    isConnected(args) {
+        if (args.DEVICE === 'phone') {
+            return this.isAndroidConnected();
+        } else if (args.DEVICE === 'kinect') {
+            return this.isKinectConnected();
+        }
+        return false; // Default to false if the device is unknown
     }
 }
 
