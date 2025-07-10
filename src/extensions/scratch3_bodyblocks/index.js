@@ -136,9 +136,13 @@ class Scratch3BodyBlocks {
                 unifiedJoints.FootLeft = transformToScratch(landmarks[31][0], landmarks[31][1]);
                 unifiedJoints.FootRight = transformToScratch(landmarks[32][0], landmarks[32][1]);
 
-                // Use the already transformed wrist as the hand position
-                unifiedJoints.HandLeft = unifiedJoints.WristLeft;
-                unifiedJoints.HandRight = unifiedJoints.WristRight;
+                // Use the already transformed points to approximate hand positions
+                // HandLeft is the midpoint of WristLeft and HandTipLeft and LittleFingerLeft and ThumbLeft                
+                unifiedJoints.HandLeft = [ (unifiedJoints.WristLeft[0] + unifiedJoints.HandTipLeft[0] + unifiedJoints.LittleFingerLeft[0] + unifiedJoints.ThumbLeft[0]) / 4,
+                                           (unifiedJoints.WristLeft[1] + unifiedJoints.HandTipLeft[1] + unifiedJoints.LittleFingerLeft[1] + unifiedJoints.ThumbLeft[1]) / 4];
+                
+                unifiedJoints.HandRight = [ (unifiedJoints.WristRight[0] + unifiedJoints.HandTipRight[0] + unifiedJoints.LittleFingerRight[0] + unifiedJoints.ThumbRight[0]) / 4,
+                                            (unifiedJoints.WristRight[1] + unifiedJoints.HandTipRight[1] + unifiedJoints.LittleFingerRight[1] + unifiedJoints.ThumbRight[1]) / 4];
 
                 // --- Now, approximate joints using the values we just calculated ---
                 const shoulderMidX = (unifiedJoints.ShoulderLeft[0] + unifiedJoints.ShoulderRight[0]) / 2;
@@ -521,11 +525,11 @@ class Scratch3BodyBlocks {
                 //         INDEX: { type: ArgumentType.STRING, menu: 'index', defaultValue: 'Closest Person' }
                 //     }
                 // },
-                {
-                    opcode: 'getTrackedUsers',
-                    blockType: BlockType.REPORTER,
-                    text: 'number of tracked people'
-                },
+                // {
+                //     opcode: 'getTrackedUsers',
+                //     blockType: BlockType.REPORTER,
+                //     text: 'number of tracked people'
+                // },
 
                 // === CONNECTION STATUS BLOCKS === Deprecated
                 // {
@@ -538,6 +542,25 @@ class Scratch3BodyBlocks {
                 //     blockType: BlockType.BOOLEAN,
                 //     text: 'phone is connected?'
                 // }
+                {
+                    opcode: 'getDirectionToCentralJoint',
+                    blockType: BlockType.REPORTER,
+                    text: '[JOINT] of [INDEX]',
+                    arguments: {
+                        JOINT: { type: ArgumentType.STRING, menu: 'torso', defaultValue: 'Head' },
+                        INDEX: { type: ArgumentType.STRING, menu: 'index', defaultValue: 'Closest Person' }
+                    }
+                },
+                {
+                    opcode: 'getDirectionToSideJoint',
+                    blockType: BlockType.REPORTER,
+                    text: '[SIDE] [LIMB] of [INDEX]',
+                    arguments: {
+                        SIDE: { type: ArgumentType.STRING, menu: 'side', defaultValue: 'Right' },
+                        LIMB: { type: ArgumentType.STRING, menu: 'limbs', defaultValue: 'Hand' },
+                        INDEX: { type: ArgumentType.STRING, menu: 'index', defaultValue: 'Closest Person' }
+                    }
+                },
                 {
                     opcode: 'getServerIpAddress',
                     blockType: BlockType.REPORTER,
@@ -770,7 +793,51 @@ class Scratch3BodyBlocks {
 
     //     return 'nothing';
     // }
+    getDirectionToSideJoint(args, util) {
+        const spriteX = util.target.x;
+        const spriteY = util.target.y;
 
+        const personIndex = this._personIndexCache[args.INDEX] || 0;
+        const jointName = args.LIMB + args.SIDE;
+        const body = this.bodies[personIndex];
+
+        if (!body || !body[jointName]) {
+            return util.target.direction;
+        }
+
+        const jointX = body[jointName][0];
+        const jointY = body[jointName][1];
+
+        const dx = jointX - spriteX;
+        const dy = jointY - spriteY;
+        const radians = Math.atan2(dy, dx);
+        const degrees = radians * 180 / Math.PI;
+
+        return 90 - degrees; // Convert to Scratch degrees
+    }
+
+    getDirectionToCentralJoint(args, util) {
+        const spriteX = util.target.x;
+        const spriteY = util.target.y;
+
+        const personIndex = this._personIndexCache[args.INDEX] || 0;
+        const jointName = args.JOINT;
+        const body = this.bodies[personIndex];
+
+        if (!body || !body[jointName]) {
+            return util.target.direction;
+        }
+
+        const jointX = body[jointName][0];
+        const jointY = body[jointName][1];
+        
+        const dx = jointX - spriteX;
+        const dy = jointY - spriteY;
+        const radians = Math.atan2(dy, dx);
+        const degrees = radians * 180 / Math.PI;
+
+        return 90 - degrees; // Convert to Scratch degrees
+    }
     isConnected(args) {
         if (args.DEVICE === 'phone') {
             return this.isAndroidConnected();
