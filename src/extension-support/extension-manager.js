@@ -14,7 +14,7 @@ const builtinExtensions = {
     coreExample: () => require('../blocks/scratch3_core_example'),
     // These are the non-core built-in extensions.
     // SRH: Added this extension to the list of built-in extensions.
-    kinect2: () => require('../extensions/scratch3_kinect'),
+    bodyblocks: () => require('../extensions/scratch3_bodyblocks'),
     // These are the core built-in extensions.
     pen: () => require('../extensions/scratch3_pen'),
     wedo2: () => require('../extensions/scratch3_wedo2'),

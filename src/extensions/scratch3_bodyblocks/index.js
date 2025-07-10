@@ -1,27 +1,30 @@
-const ArgumentType = require('../../extension-support/argument-type');
-const BlockType = require('../../extension-support/block-type');
+const ArgumentType = require('../../extension-support/argument-type.js');
+const BlockType = require('../../extension-support/block-type.js');
 const formatMessage = require('format-message');
-
+const _menuIconURI = require('./icon.js');
+const _blockIconURI = require('./block.js');
 /**
- * PoseLandmarkBlocks Extension for Scratch 3.0
+ * Body Blocks Extension for Scratch 3.0
  * Detects human pose landmarks from Kinect (legacy) and Android (primary) sources
- * Based on MediaPipe PoseLandmarker methodology
+ * Based on MediaPipe PoseLandmarker model (see acknowledgements file for details)
  * @param {Runtime} runtime - the runtime instantiating this block package.
  */
-class Scratch3PoseLandmarkBlocks {
+class Scratch3BodyBlocks {
+
+
     constructor(runtime) {
         this.runtime = runtime;
-        
+
         // === SHARED DATA STRUCTURES ===
         this._initializeSharedData();
-        
+
         // === KINECT SETUP ===
         this._initializeKinect();
-        
+
         // === ANDROID SETUP ===
         this._initializeAndroid();
-        
-        console.log('PoseLandmarkBlocks extension initialized');
+
+        console.log('Body Blocks extension initialized');
     }
 
     // ====================================================================
@@ -35,28 +38,50 @@ class Scratch3PoseLandmarkBlocks {
     _initializeSharedData() {
         // Pre-allocate body data structure for performance
         const emptyBody = {
-            rightHandState: 'Unknown',
-            leftHandState: 'Unknown',
-            // Pre-define all joint positions as null
-            Head: null, Neck: null, SpineShoulder: null, SpineMid: null, SpineBase: null,
-            ShoulderLeft: null, ElbowLeft: null, WristLeft: null, HandLeft: null, HandTipLeft: null, ThumbLeft: null,
-            ShoulderRight: null, ElbowRight: null, WristRight: null, HandRight: null, HandTipRight: null, ThumbRight: null,
-            HipLeft: null, KneeLeft: null, AnkleLeft: null, FootLeft: null,
-            HipRight: null, KneeRight: null, AnkleRight: null, FootRight: null
+            Head: null,
+            Neck: null,
+            SpineShoulder: null,
+            SpineMid: null,
+            SpineBase: null,
+
+            ShoulderLeft: null,
+            ElbowLeft: null,
+            WristLeft: null,
+            HandLeft: null,
+            ThumbLeft: null,
+            LittleFingerLeft: null,
+            HandTipLeft: null,
+
+            ShoulderRight: null,
+            ElbowRight: null,
+            WristRight: null,
+            HandRight: null,
+            ThumbRight: null,
+            LittleFingerRight: null,
+            HandTipRight: null,
+
+            HipLeft: null,
+            HipRight: null,
+
+            KneeLeft: null,
+            KneeRight: null,
+            AnkleLeft: null,
+            AnkleRight: null,
+            FootLeft: null,
+            FootRight: null
+
+
         };
-        
-        // Pre-allocate array for 7 bodies (performance: avoid dynamic allocation)
+
+        // This part remains the same.
         this.bodies = new Array(7);
         for (let i = 0; i < 7; i++) {
-            this.bodies[i] = {...emptyBody};
+            this.bodies[i] = { ...emptyBody };
         }
-        
         this.numTracked = 0;
-        
-        // Cache for frequently accessed values (performance optimization)
-        this._coordIndexCache = { X: 0, Y: 1, Z: 2 };
+        this._coordIndexCache = { X: 0, Y: 1 }; // Z coordinate removed.
         this._personIndexCache = {
-            'Closest Person': 0, 'Person 1': 1, 'Person 2': 2, 
+            'Closest Person': 0, 'Person 1': 1, 'Person 2': 2,
             'Person 3': 3, 'Person 4': 4, 'Person 5': 5, 'Person 6': 6
         };
     }
@@ -68,36 +93,101 @@ class Scratch3PoseLandmarkBlocks {
      * @private
      */
     _handleIncomingData(dataString) {
+        // Log 1: See the raw data exactly as it arrives from the phone.
+        console.log('Raw Data String:', dataString);
         try {
             const data = JSON.parse(dataString);
-            // Debugging output for incoming data
-            // console.log('PoseLandmarkBlocks: Received data:', data);
-            
-            // Fast path for body data (most common)
-            if (data.type === 'body') {
-                const bodyIndex = data.bodyIndex;
-                if (bodyIndex >= 0 && bodyIndex < 7) {
-                    // Direct assignment - no unnecessary copying
-                    Object.assign(this.bodies[bodyIndex], data.joints);
-                    this.bodies[bodyIndex].rightHandState = data.rightHandState || 'Unknown';
-                    this.bodies[bodyIndex].leftHandState = data.leftHandState || 'Unknown';
-                }
-                return;
-            }
-            
-            // Handle scene updates
-            if (data.type === 'scene') {
+                        
+            const unifiedJoints = {};            
+            const bodyIndex = data.bodyIndex || 0;
+
+            if (data.landmarks && Array.isArray(data.landmarks)) {
+                if (data.landmarks.length === 0) return;
+
+                const landmarks = data.landmarks;
+                                
+                const transformToScratch = (x, y) => {
+                    const scratchX = (x * 480) - 240;
+                    const scratchY = 180 - (y * 360);
+                    return [scratchX, scratchY];
+                };
+
+                // --- Map and Transform all landmarks first ---
+                unifiedJoints.Head = transformToScratch(landmarks[0][0], landmarks[0][1]);
+                unifiedJoints.ShoulderLeft = transformToScratch(landmarks[11][0], landmarks[11][1]);
+                unifiedJoints.ShoulderRight = transformToScratch(landmarks[12][0], landmarks[12][1]);
+                unifiedJoints.ElbowLeft = transformToScratch(landmarks[13][0], landmarks[13][1]);
+                unifiedJoints.ElbowRight = transformToScratch(landmarks[14][0], landmarks[14][1]);
+                unifiedJoints.WristLeft = transformToScratch(landmarks[15][0], landmarks[15][1]);
+                unifiedJoints.WristRight = transformToScratch(landmarks[16][0], landmarks[16][1]);
+                unifiedJoints.LittleFingerLeft = transformToScratch(landmarks[17][0], landmarks[17][1]);
+                unifiedJoints.LittleFingerRight = transformToScratch(landmarks[18][0], landmarks[18][1]);
+                unifiedJoints.HandTipLeft = transformToScratch(landmarks[19][0], landmarks[19][1]);
+                unifiedJoints.HandTipRight = transformToScratch(landmarks[20][0], landmarks[20][1]);
+                unifiedJoints.ThumbLeft = transformToScratch(landmarks[21][0], landmarks[21][1]);
+                unifiedJoints.ThumbRight = transformToScratch(landmarks[22][0], landmarks[22][1]);
+                unifiedJoints.HipLeft = transformToScratch(landmarks[23][0], landmarks[23][1]);
+                unifiedJoints.HipRight = transformToScratch(landmarks[24][0], landmarks[24][1]);
+
+                unifiedJoints.KneeLeft = transformToScratch(landmarks[25][0], landmarks[25][1]);
+                unifiedJoints.KneeRight = transformToScratch(landmarks[26][0], landmarks[26][1]);                
+                unifiedJoints.AnkleLeft = transformToScratch(landmarks[27][0], landmarks[27][1]);
+                unifiedJoints.AnkleRight = transformToScratch(landmarks[28][0], landmarks[28][1]);
+                unifiedJoints.FootLeft = transformToScratch(landmarks[31][0], landmarks[31][1]);
+                unifiedJoints.FootRight = transformToScratch(landmarks[32][0], landmarks[32][1]);
+
+                // Use the already transformed wrist as the hand position
+                unifiedJoints.HandLeft = unifiedJoints.WristLeft;
+                unifiedJoints.HandRight = unifiedJoints.WristRight;
+
+                // --- Now, approximate joints using the values we just calculated ---
+                const shoulderMidX = (unifiedJoints.ShoulderLeft[0] + unifiedJoints.ShoulderRight[0]) / 2;
+                const shoulderMidY = (unifiedJoints.ShoulderLeft[1] + unifiedJoints.ShoulderRight[1]) / 2;
+                unifiedJoints.SpineShoulder = [shoulderMidX, shoulderMidY];
+
+                const hipMidX = (unifiedJoints.HipLeft[0] + unifiedJoints.HipRight[0]) / 2;
+                const hipMidY = (unifiedJoints.HipLeft[1] + unifiedJoints.HipRight[1]) / 2;
+                unifiedJoints.SpineBase = [hipMidX, hipMidY];
+
+                const spineMidX = (shoulderMidX + hipMidX) / 2;
+                const spineMidY = (shoulderMidY + hipMidY) / 2;
+                unifiedJoints.SpineMid = [spineMidX, spineMidY];
+
+                const neckX = (shoulderMidX * 0.25) + (unifiedJoints.Head[0] * 0.75);
+                const neckY = (shoulderMidY * 0.25) + (unifiedJoints.Head[1] * 0.75);
+                unifiedJoints.Neck = [neckX, neckY];
+
+                // --- Finally, assign the complete data ---
+                // First, create a fresh, empty body object
+                const newBody = { ...this.emptyBody };
+                // Then, apply the new joint data over top of it
+                Object.assign(newBody, unifiedJoints);
+                // Finally, replace the old body data entirely with the new one
+                this.bodies[bodyIndex] = newBody;
+                // Log 2: See the mapped joints right before they are saved. (Debug)
+                // console.log('Mapped Unified Joints:', unifiedJoints);
+
+            } else if (data.joints) {
+                // --- It's Kinect Data ---
+                // This directly maps our old Kinect data to the new unified skeleton
+                const joints = data.joints;
+                Object.assign(unifiedJoints, joints);
+                
+            } else if (data.type === 'scene') {
                 this.numTracked = data.numTracked || 0;
                 return;
+            } else {
+                return; // Unrecognized data format
+            }            
+
+            // Assign the processed data to our internal state
+            if (bodyIndex >= 0 && bodyIndex < 7) {
+                Object.assign(this.bodies[bodyIndex], unifiedJoints);
             }
-            
-            // Handle events (entry/exit)
-            if (data.type === 'event') {
-                // Future: trigger Scratch events here
-                console.log(`Motion event: ${data.eventType}`);
-            }
+
         } catch (error) {
-            console.error('PoseLandmarkBlocks: Error parsing data:', error);
+            // Fail silently in production but scream in debug mode
+            console.error('❌ CRITICAL ERROR in _handleIncomingData:', error);
         }
     }
 
@@ -165,14 +255,14 @@ class Scratch3PoseLandmarkBlocks {
      */
     connectKinectAndWait() {
         console.log('Kinect: Starting connection and waiting...');
-        
+
         // Start the connection
         this.connectKinect();
-        
+
         return new Promise((resolve) => {
             let dataReceived = false;
             let statusCount = 0;
-            
+
             // Listen for first data message to confirm server is responding
             const originalHandler = this._handleIncomingData.bind(this);
             this._handleIncomingData = (dataString) => {
@@ -184,10 +274,10 @@ class Scratch3PoseLandmarkBlocks {
                     resolve();
                 }
             };
-            
+
             const checkConnection = () => {
                 statusCount++;
-                
+
                 if (this.kinectConnectionStatus === 2 && dataReceived) {
                     // Connected and receiving data - already resolved above
                     return;
@@ -206,11 +296,11 @@ class Scratch3PoseLandmarkBlocks {
                         console.log('💡 Tip: Stand in front of the Kinect sensor');
                     }
                 }
-                
+
                 // Keep checking every 500ms
                 setTimeout(checkConnection, 500);
             };
-            
+
             // Start checking
             checkConnection();
         });
@@ -221,9 +311,9 @@ class Scratch3PoseLandmarkBlocks {
      * @returns {boolean}
      */
     isKinectConnected() {
-        return this.kinectConnectionStatus === 2 && 
-               this.kinectConnection && 
-               this.kinectConnection.readyState === 1;
+        return this.kinectConnectionStatus === 2 &&
+            this.kinectConnection &&
+            this.kinectConnection.readyState === 1;
     }
 
     /**
@@ -249,7 +339,7 @@ class Scratch3PoseLandmarkBlocks {
         this.androidConnectionStatus = false;
         this.androidClientCount = 0;
         this.isWaitingForPhone = false; // Track if we're actively waiting
-        
+
         // Setup IPC listeners for Android communication
         this._setupAndroidIPC();
     }
@@ -263,16 +353,16 @@ class Scratch3PoseLandmarkBlocks {
             console.warn('Android: API not available (not in Electron)');
             return;
         }
-        
+
         // Listen for Android device data
-        window.electronAPI.onPoseData((event, dataString) => {            
+        window.electronAPI.onPoseData((dataString) => {
             this._handleIncomingData(dataString);
         });
-        
+
         window.electronAPI.onPoseConnectionStatus(status => {
             console.log('Android: Connection status update received:', status);
-            this.androidConnectionStatus = status.connected;        
-            this.androidClientCount = status.count; 
+            this.androidConnectionStatus = status.connected;
+            this.androidClientCount = status.count;
         });
     }
 
@@ -281,9 +371,9 @@ class Scratch3PoseLandmarkBlocks {
      * @private
      */
     _hasAndroidAPI() {
-        return typeof window !== 'undefined' && 
-           window.electronAPI && 
-           window.electronAPI.isElectron;
+        return typeof window !== 'undefined' &&
+            window.electronAPI &&
+            window.electronAPI.isElectron;
     }
 
     /**
@@ -294,9 +384,9 @@ class Scratch3PoseLandmarkBlocks {
             console.log('Android: Server not available (not in Electron)');
             return;
         }
-        
+
         console.log('Android: Starting server...');
-        
+
         try {
             const result = await window.electronAPI.startPoseServer();
             console.log(`Android: ${result.message}`);
@@ -328,7 +418,7 @@ class Scratch3PoseLandmarkBlocks {
             // 3. Use the dedicated one-time listener we created in preload.js.
             this.runtime.electronAPI.onPoseClientConnected(() => {
                 console.log('✅ Android: Phone connected! Resuming Scratch script.');
-                
+
                 // 4. When the main process tells us a client has connected,
                 // we resolve the promise. This tells the Scratch VM to continue.
                 resolve();
@@ -342,7 +432,7 @@ class Scratch3PoseLandmarkBlocks {
      */
     isAndroidConnected() {
         return this.androidConnectionStatus;
-         //&& this.androidClientCount > 0;
+        //&& this.androidClientCount > 0;
     }
 
     // ====================================================================
@@ -354,14 +444,14 @@ class Scratch3PoseLandmarkBlocks {
      */
     getInfo() {
         return {
-            id: 'poselandmarkblocks',
+            id: 'bodyblocks',
             name: formatMessage({
-                id: 'poselandmark.categoryName',
-                default: 'Pose Landmark Blocks',
-                description: 'Human pose landmark detection for Kinect and Android'                
+                id: 'bodyblocks.categoryName',
+                default: 'Body Poses',
+                description: 'Human body pose detection for Kinect and Android'
             }),
-            menuIconURI: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
-            blockIconURI: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjwvc3ZnPg==',            
+            menuIconURI: _menuIconURI,
+            blockIconURI: _blockIconURI,
             blocks: [
                 // === CONNECTION BLOCKS ===
                 {
@@ -390,7 +480,7 @@ class Scratch3PoseLandmarkBlocks {
                 },
                 {
                     opcode: 'stopConnection',
-                    blockType: BlockType.COMMAND,   
+                    blockType: BlockType.COMMAND,
                     text: 'stop connection'
                 },
                 // {
@@ -398,7 +488,7 @@ class Scratch3PoseLandmarkBlocks {
                 //     blockType: BlockType.REPORTER,
                 //     text: 'what is connected'
                 // },
-                
+
                 // === BODY POSITION BLOCKS ===
                 {
                     opcode: 'getLimbCoordinate',
@@ -421,22 +511,22 @@ class Scratch3PoseLandmarkBlocks {
                         INDEX: { type: ArgumentType.STRING, menu: 'index', defaultValue: 'Closest Person' }
                     }
                 },
-                {
-                    opcode: 'isHandState',
-                    blockType: BlockType.BOOLEAN,
-                    text: '[SIDE] Hand is [STATE] of [INDEX]',
-                    arguments: {
-                        SIDE: { type: ArgumentType.STRING, menu: 'side', defaultValue: 'Right' },
-                        STATE: { type: ArgumentType.STRING, menu: 'state', defaultValue: 'Closed' },
-                        INDEX: { type: ArgumentType.STRING, menu: 'index', defaultValue: 'Closest Person' }
-                    }
-                },
+                // {
+                //     opcode: 'isHandState',
+                //     blockType: BlockType.BOOLEAN,
+                //     text: '[SIDE] Hand is [STATE] of [INDEX]',
+                //     arguments: {
+                //         SIDE: { type: ArgumentType.STRING, menu: 'side', defaultValue: 'Right' },
+                //         STATE: { type: ArgumentType.STRING, menu: 'state', defaultValue: 'Closed' },
+                //         INDEX: { type: ArgumentType.STRING, menu: 'index', defaultValue: 'Closest Person' }
+                //     }
+                // },
                 {
                     opcode: 'getTrackedUsers',
                     blockType: BlockType.REPORTER,
                     text: 'number of tracked people'
                 },
-                
+
                 // === CONNECTION STATUS BLOCKS === Deprecated
                 // {
                 //     opcode: 'isKinectConnected',
@@ -448,8 +538,14 @@ class Scratch3PoseLandmarkBlocks {
                 //     blockType: BlockType.BOOLEAN,
                 //     text: 'phone is connected?'
                 // }
+                {
+                    opcode: 'getServerIpAddress',
+                    blockType: BlockType.REPORTER,
+                    text: 'server IP address',
+                    allowGetBlock: true
+                },
             ],
-            menus: { 
+            menus: {
                 devices: {
                     acceptReporters: true,
                     items: [
@@ -474,7 +570,7 @@ class Scratch3PoseLandmarkBlocks {
                     items: [
                         { text: 'X', value: 'X' },
                         { text: 'Y', value: 'Y' },
-                        { text: 'Z', value: 'Z' }
+                        // { text: 'Z', value: 'Z' } Deprecated, rarely used in blocks
                     ]
                 },
                 side: {
@@ -510,7 +606,8 @@ class Scratch3PoseLandmarkBlocks {
                         { text: 'Elbow', value: 'Elbow' },
                         { text: 'Wrist', value: 'Wrist' },
                         { text: 'Hand', value: 'Hand' },
-                        { text: 'HandTip', value: 'HandTip' },
+                        { text: 'Index Finger', value: 'HandTip' },
+                        { text: 'Little Finger', value: 'LittleFinger' },
                         { text: 'Thumb', value: 'Thumb' },
                         { text: 'Hip', value: 'Hip' },
                         { text: 'Knee', value: 'Knee' },
@@ -544,14 +641,14 @@ class Scratch3PoseLandmarkBlocks {
      * @returns {Promise} Promise that resolves when connected and ready
      */
     async startConnectionAndWait(args) {
-        
+
         // console.log('getValue - window exists:', typeof window);
         // console.log('getValue - electronAPI exists:', typeof window.electronAPI);
         // console.log('getValue - runtime electronAPI:', typeof this.runtime.electronAPI);
 
         console.log(`🚀 Starting ${args.DEVICE} connection and waiting...`);
         console.log('💡 Press the red stop button to cancel if needed');
-        
+
         try {
             if (args.DEVICE === 'phone') {
                 await this.startAndroidServerAndWait();
@@ -571,7 +668,7 @@ class Scratch3PoseLandmarkBlocks {
         }
     }
 
-    
+
     stopConnection() {
         // Disconnect from Kinect if it's connected
         this.disconnectKinect();
@@ -581,7 +678,7 @@ class Scratch3PoseLandmarkBlocks {
             window.electronAPI.stopPoseClient();
         }
         // Immediately update the extension's internal state
-        this.androidConnectionStatus = false; 
+        this.androidConnectionStatus = false;
     }
 
     /**
@@ -593,13 +690,14 @@ class Scratch3PoseLandmarkBlocks {
         // Use cached indices for performance
         const personIndex = this._personIndexCache[args.INDEX] || 0;
         const coordIndex = this._coordIndexCache[args.COORDINATE] || 0;
-        
-        // Combine side and limb like original: "Right" + "Hand" = "HandRight"
+
+        // Combine side and limb from menus to create the joint name, e.g., "HandRight"
         const jointName = args.LIMB + args.SIDE;
-        
+
         const body = this.bodies[personIndex];
         if (body && body[jointName]) {
             const joint = body[jointName];
+            // Return the specific coordinate (X or Y) or 0 if it's not available
             return joint[coordIndex] || 0;
         }
         return 0;
@@ -613,7 +711,7 @@ class Scratch3PoseLandmarkBlocks {
     getTorsoCoordinate(args) {
         const personIndex = this._personIndexCache[args.INDEX] || 0;
         const coordIndex = this._coordIndexCache[args.COORDINATE] || 0;
-        
+
         const body = this.bodies[personIndex];
         if (body && body[args.TORSO]) {
             const joint = body[args.TORSO];
@@ -630,7 +728,7 @@ class Scratch3PoseLandmarkBlocks {
     isHandState(args) {
         const personIndex = this._personIndexCache[args.INDEX] || 0;
         const body = this.bodies[personIndex];
-        
+
         if (body) {
             const currentState = args.SIDE === 'Right' ? body.rightHandState : body.leftHandState;
             return currentState === args.STATE;
@@ -653,7 +751,7 @@ class Scratch3PoseLandmarkBlocks {
     // getConnectionStatus() {
     //     const kinect = this.isKinectConnected();
     //     const android = this.isAndroidConnected();
-        
+
     //     // Check for connecting/waiting states
     //     if (this.kinectConnectionStatus === 1) {
     //         return 'connecting to Kinect...';
@@ -664,12 +762,12 @@ class Scratch3PoseLandmarkBlocks {
     //     if (this.isWaitingForPhone) {
     //         return 'waiting for phone...';
     //     }
-        
+
     //     // Show actual connections
     //     if (kinect && android) return 'Kinect camera and phone';
     //     if (kinect) return 'Kinect camera';
     //     if (android) return `phone (${this.androidClientCount})`;
-        
+
     //     return 'nothing';
     // }
 
@@ -681,6 +779,23 @@ class Scratch3PoseLandmarkBlocks {
         }
         return false; // Default to false if the device is unknown
     }
+
+    getServerIpAddress() {
+        // Check if the API is available on the window object
+        if (!window.electronAPI) {
+            return 'not available'; // Return a default value if not in Electron
+        }
+
+        // Return a Promise that resolves with the IP address
+        return window.electronAPI.getAppInfo().then(info => {
+            if (info && info.ipAddress) {
+                return `${info.ipAddress}:8183`; // Append the port number
+            }
+            return 'not available';
+        }).catch(() => {
+            return 'error';
+        });
+    }
 }
 
-module.exports = Scratch3PoseLandmarkBlocks;
+module.exports = Scratch3BodyBlocks;
