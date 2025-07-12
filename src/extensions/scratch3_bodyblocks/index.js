@@ -24,9 +24,77 @@ class Scratch3BodyBlocks {
         // === ANDROID SETUP ===
         this._initializeAndroid();
 
-        console.log('Body Blocks extension initialized');
+        // --- Create and Synchronize the Skeleton Canvas ---         
+        this.createSkeletonCanvas();
+    }
+    
+    createSkeletonCanvas() {
+        console.log('Initializing CSS-based skeleton canvas...');
+
+        const stageWrapper = this.runtime.renderer.canvas.parentElement;
+
+        this.skeletonCanvas = document.createElement('canvas');
+        this.skeletonCtx = this.skeletonCanvas.getContext('2d');
+
+        // 1. Set the canvas's INTERNAL resolution ONCE. This is the surface we draw on.
+        //    It should match Scratch's native stage size.
+        this.skeletonCanvas.width = 480;
+        this.skeletonCanvas.height = 360;
+
+        // 2. Use CSS to make the canvas a perfect, auto-stretching overlay.
+        this.skeletonCanvas.style.position = 'absolute';
+        this.skeletonCanvas.style.top = '0';
+        this.skeletonCanvas.style.left = '0';
+        this.skeletonCanvas.style.width = '100%'; // Stretch to fill the container's width
+        this.skeletonCanvas.style.height = '100%'; // Stretch to fill the container's height
+        this.skeletonCanvas.style.pointerEvents = 'none'; // Make it click-through
+
+
+        // 3. Add it to the stage's container.
+        stageWrapper.appendChild(this.skeletonCanvas);
+
+        // Other member variables we need for the skeleton canvas
+        this.skeletonColor = 'rgba(200, 201, 222, 0.81)'; // Default color
+
+        console.log('Skeleton canvas setup complete.');
     }
 
+/**
+ * Called when the Scratch stage changes size.
+ * @param {object} detail - An object with the new width and height.
+ * @param {number} detail.width - The new width of the stage.
+ * @param {number} detail.height - The new height of the stage.
+ */
+// onStageSizeChanged({width, height}) {
+//     console.log('Stage size changed:', width, height);
+
+//    const stage = this.runtime.renderer.canvas;
+    
+//     // Update canvas internal resolution
+//     this.skeletonCanvas.width = stage.width;
+//     this.skeletonCanvas.height = stage.height;
+    
+//     // Copy ALL CSS properties from the stage canvas
+//     const stageStyles = window.getComputedStyle(stage);
+//     this.skeletonCanvas.style.width = stageStyles.width;
+//     this.skeletonCanvas.style.height = stageStyles.height;
+//     this.skeletonCanvas.style.transform = stageStyles.transform;
+//     this.skeletonCanvas.style.transformOrigin = stageStyles.transformOrigin;
+    
+//     // Ensure it stays as overlay
+//     this.skeletonCanvas.style.position = 'absolute';
+//     this.skeletonCanvas.style.left = '0';
+//     this.skeletonCanvas.style.top = '0';
+//     this.skeletonCanvas.style.pointerEvents = 'none';
+    
+//     console.log('Skeleton canvas resized:', {
+//         width: this.skeletonCanvas.width,
+//         height: this.skeletonCanvas.height,
+//         cssWidth: this.skeletonCanvas.style.width,
+//         cssHeight: this.skeletonCanvas.style.height,
+//         transform: this.skeletonCanvas.style.transform
+//     });
+// }
     // ====================================================================
     // === SHARED CORE FUNCTIONALITY ===
     // ====================================================================
@@ -92,9 +160,7 @@ class Scratch3BodyBlocks {
      * @param {string} dataString - JSON data from either source
      * @private
      */
-    _handleIncomingData(dataString) {
-        // Log 1: See the raw data exactly as it arrives from the phone.
-        console.log('Raw Data String:', dataString);
+    _handleIncomingData(dataString) {        
         try {
             const data = JSON.parse(dataString);
                         
@@ -562,6 +628,28 @@ class Scratch3BodyBlocks {
                     }
                 },
                 {
+                    opcode: 'setSkeletonColor',
+                    blockType: BlockType.COMMAND,
+                    text: 'set skeleton color to [COLOR]',
+                    arguments: {
+                        COLOR: {
+                            type: ArgumentType.COLOR
+                        }
+                    }
+                },
+                {
+                    opcode: 'drawSkeleton',
+                    blockType: BlockType.COMMAND,
+                    text: 'draw skeleton for [INDEX]',
+                    arguments: {
+                        INDEX: {
+                            type: ArgumentType.STRING,
+                            menu: 'index',
+                            defaultValue: 'Closest Person'
+                        }
+                    }
+                },
+                {
                     opcode: 'getServerIpAddress',
                     blockType: BlockType.REPORTER,
                     text: 'server IP address',
@@ -845,6 +933,110 @@ class Scratch3BodyBlocks {
             return this.isKinectConnected();
         }
         return false; // Default to false if the device is unknown
+    }
+    
+    /**
+     * Draw the skeleton of a person on the canvas
+     * @param {object} args - block arguments
+     * 
+     */
+    drawSkeleton (args) {
+        const personIndex = this._personIndexCache[args.INDEX] || 0;
+        const body = this.bodies[personIndex];
+
+        const w = 480; // The fixed width of our drawing canvas
+        const h = 360; // The fixed height of our drawing canvas
+
+        this.skeletonCtx.clearRect(0, 0, w, h);
+
+        if (!body || !body.Head) {
+            return; // Stop if no data
+        }
+        
+        try {
+            // --- Draw the Head ---
+            const headX = body.Head[0] + w / 2;
+            const headY = -body.Head[1] + h / 2;
+
+            this.skeletonCtx.fillStyle = this.skeletonColor;
+            this.skeletonCtx.strokeStyle = this.skeletonColor;
+
+            this.skeletonCtx.beginPath();
+            this.skeletonCtx.arc(headX, headY, 20, 0, Math.PI * 2);
+            this.skeletonCtx.fill();
+
+            // --- Draw the Skeleton Bones ---            
+            // Set a fixed line width that looks good on the 480x360 canvas
+            this.skeletonCtx.lineWidth = 4;
+            
+            const drawBone = (jointName1, jointName2) => {
+                const joint1 = body[jointName1];
+                const joint2 = body[jointName2];
+                
+                if (joint1 && joint2) {
+                    // The coordinate math no longer multiplies by `scale`
+                    const x1 = joint1[0] + w / 2;
+                    const y1 = -joint1[1] + h / 2;
+                    const x2 = joint2[0] + w / 2;
+                    const y2 = -joint2[1] + h / 2;
+                    
+                    this.skeletonCtx.beginPath();
+                    this.skeletonCtx.moveTo(x1, y1);
+                    this.skeletonCtx.lineTo(x2, y2);
+                    this.skeletonCtx.stroke();
+                }
+            };
+            // --- Draw the skeleton by connecting the "bones" ---
+            // Spine
+            drawBone('Head', 'Neck'); 
+            drawBone('Neck', 'SpineShoulder');
+            drawBone('SpineShoulder', 'SpineMid');
+            drawBone('SpineMid', 'SpineBase');
+            
+            // Torso
+            drawBone('ShoulderLeft', 'SpineShoulder');        
+            drawBone('ShoulderRight', 'SpineShoulder');        
+                                    
+            drawBone('ShoulderLeft', 'HipLeft');
+            drawBone('ShoulderRight', 'HipRight');
+            drawBone('HipLeft', 'SpineBase');
+            drawBone('HipRight', 'SpineBase');
+
+            // Left Arm
+            drawBone('ShoulderLeft', 'ElbowLeft');
+            drawBone('ElbowLeft', 'WristLeft');
+            drawBone('WristLeft', 'HandLeft');
+            
+            // Right Arm
+            drawBone('ShoulderRight', 'ElbowRight');
+            drawBone('ElbowRight', 'WristRight');
+            drawBone('WristRight', 'HandRight');
+            
+            // Left Leg
+            drawBone('HipLeft', 'KneeLeft');
+            drawBone('KneeLeft', 'AnkleLeft');
+            drawBone('FootLeft', 'AnkleLeft');
+            
+            // Right Leg
+            drawBone('HipRight', 'KneeRight');
+            drawBone('KneeRight', 'AnkleRight');
+            drawBone('FootRight', 'AnkleRight');                        
+            
+        } catch (e) {
+            console.error("Error during skeleton draw:", e);
+        }                
+    }
+
+    setSkeletonColor(args) {
+        // The color argument comes in as a hex string, e.g., '#00ff00'
+        // We need to convert it to an rgba string to include transparency.
+        const hex = args.COLOR.replace('#', '');
+        const r = parseInt(hex.substring(0, 2), 16);
+        const g = parseInt(hex.substring(2, 4), 16);
+        const b = parseInt(hex.substring(4, 6), 16);
+
+        // We'll keep the transparency fixed at 0.8 for now.
+        this.skeletonColor = `rgba(${r}, ${g}, ${b}, 0.8)`;
     }
 
     getServerIpAddress() {
