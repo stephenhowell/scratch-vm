@@ -1,12 +1,16 @@
 const ArgumentType = require('../../extension-support/argument-type.js');
 const BlockType = require('../../extension-support/block-type.js');
 const formatMessage = require('format-message');
+const Color = require('../../util/color');
+const Cast = require('../../util/cast');
+const MathUtil = require('../../util/math-util');
 const _menuIconURI = require('./icon.js');
 const _blockIconURI = require('./block.js');
+
 /**
  * Body Blocks Extension for Scratch 3.0
  * Detects human pose landmarks from Kinect (legacy) and Android (primary) sources
- * Based on MediaPipe PoseLandmarker model (see acknowledgements file for details)
+ * Based on MediaPipe PoseLandmarker model (see acknowledgements file in /licenses/ for details)
  * @param {Runtime} runtime - the runtime instantiating this block package.
  */
 class Scratch3BodyBlocks {
@@ -15,21 +19,21 @@ class Scratch3BodyBlocks {
     constructor(runtime) {
         this.runtime = runtime;
 
-        // === SHARED DATA STRUCTURES ===
+        // Kinect and now Android data will be stored here
         this._initializeSharedData();
 
-        // === KINECT SETUP ===
+        // Legacy Kinect functionality
         this._initializeKinect();
 
-        // === ANDROID SETUP ===
+        // New Android functionality
         this._initializeAndroid();
 
-        // --- Create and Synchronize the Skeleton Canvas ---         
+        // Create the new canvas for drawing skeleton (so user "knows" when it's active, doesn't interfere with the stage/sprites)
         this.createSkeletonCanvas();
     }
     
     createSkeletonCanvas() {
-        console.log('Initializing CSS-based skeleton canvas...');
+        // console.log('Initializing CSS-based skeleton canvas...');
 
         const stageWrapper = this.runtime.renderer.canvas.parentElement;
 
@@ -54,9 +58,14 @@ class Scratch3BodyBlocks {
         stageWrapper.appendChild(this.skeletonCanvas);
 
         // Other member variables we need for the skeleton canvas
-        this.skeletonColor = 'rgba(200, 201, 222, 0.81)'; // Default color
+        this.skeletonColor = 33.3;       // Hue (0-100), default is green
+        this.skeletonSaturation = 100;   // Saturation (0-100)
+        this.skeletonBrightness = 100;   // Brightness (0-100)        
 
-        console.log('Skeleton canvas setup complete.');
+        this.skeletonLineWidth = 4;
+        this.isHeadVisible = true;
+        this.isSkeletonVisible = true;    // Master on/off switch
+
     }
 
 /**
@@ -140,8 +149,7 @@ class Scratch3BodyBlocks {
 
 
         };
-
-        // This part remains the same.
+        
         this.bodies = new Array(7);
         for (let i = 0; i < 7; i++) {
             this.bodies[i] = { ...emptyBody };
@@ -279,7 +287,7 @@ class Scratch3BodyBlocks {
      */
     connectKinect() {
         if (this.kinectConnectionStatus !== 0) {
-            console.log('Kinect: Connection already in progress or established');
+            // console.log('Kinect: Connection already in progress or established');
             return;
         }
 
@@ -291,15 +299,15 @@ class Scratch3BodyBlocks {
         try {
             this.kinectConnection = new window.WebSocket('ws://localhost:8181/');
             this.kinectConnectionStatus = 1;
-            console.log('Kinect: Connecting to localhost:8181...');
+            // console.log('Kinect: Connecting to localhost:8181...');
 
             this.kinectConnection.onopen = () => {
-                console.log('Kinect: Connected successfully');
+                // console.log('Kinect: Connected successfully');
                 this.kinectConnectionStatus = 2;
             };
 
             this.kinectConnection.onclose = () => {
-                console.log('Kinect: Connection closed');
+                // console.log('Kinect: Connection closed');
                 this.kinectConnectionStatus = 0;
                 this.kinectConnection = null;
             };
@@ -324,7 +332,7 @@ class Scratch3BodyBlocks {
      * @returns {Promise} Promise that resolves when Kinect is connected and responding
      */
     connectKinectAndWait() {
-        console.log('Kinect: Starting connection and waiting...');
+        // console.log('Kinect: Starting connection and waiting...');
 
         // Start the connection
         this.connectKinect();
@@ -339,7 +347,7 @@ class Scratch3BodyBlocks {
                 originalHandler(dataString);
                 if (!dataReceived) {
                     dataReceived = true;
-                    console.log('✅ Kinect: Connection confirmed - receiving data!');
+                    // console.log('✅ Kinect: Connection confirmed - receiving data!');
                     this._handleIncomingData = originalHandler; // Restore handler
                     resolve();
                 }
@@ -354,16 +362,16 @@ class Scratch3BodyBlocks {
                 } else if (this.kinectConnectionStatus === 0) {
                     // Not connected yet - show helpful message
                     if (statusCount % 10 === 1) { // Every 5 seconds
-                        console.log('⏳ Kinect: Waiting for Kinect2Scratch.exe to start...');
-                        console.log('💡 Tip: Make sure Kinect2Scratch.exe is running on port 8181');
+                        // console.log('⏳ Kinect: Waiting for Kinect2Scratch.exe to start...');
+                        // console.log('💡 Tip: Make sure Kinect2Scratch.exe is running on port 8181');
                     }
                     // Try connecting again
                     this.connectKinect();
                 } else if (this.kinectConnectionStatus === 2 && !dataReceived) {
                     // Connected but no data yet
                     if (statusCount % 6 === 1) { // Every 3 seconds  
-                        console.log('⏳ Kinect: Connected to server, waiting for pose data...');
-                        console.log('💡 Tip: Stand in front of the Kinect sensor');
+                        // console.log('⏳ Kinect: Connected to server, waiting for pose data...');
+                        // console.log('💡 Tip: Stand in front of the Kinect sensor');
                     }
                 }
 
@@ -393,7 +401,7 @@ class Scratch3BodyBlocks {
         if (this.kinectConnection && this.kinectConnection.readyState === 1) {
             this.kinectConnection.close();
             this.kinectConnectionStatus = 0;
-            console.log('Kinect: Disconnected by user');
+            // console.log('Kinect: Disconnected by user');
         }
     }
 
@@ -430,7 +438,7 @@ class Scratch3BodyBlocks {
         });
 
         window.electronAPI.onPoseConnectionStatus(status => {
-            console.log('Android: Connection status update received:', status);
+            // console.log('Android: Connection status update received:', status);
             this.androidConnectionStatus = status.connected;
             this.androidClientCount = status.count;
         });
@@ -451,15 +459,15 @@ class Scratch3BodyBlocks {
      */
     async startAndroidServer() {
         if (!this._hasAndroidAPI()) {
-            console.log('Android: Server not available (not in Electron)');
+            // console.log('Android: Server not available (not in Electron)');
             return;
         }
 
-        console.log('Android: Starting server...');
+        // console.log('Android: Starting server...');
 
         try {
             const result = await window.electronAPI.startPoseServer();
-            console.log(`Android: ${result.message}`);
+            // console.log(`Android: ${result.message}`);
         } catch (error) {
             console.error('Android: Server start error:', error);
         }
@@ -476,18 +484,18 @@ class Scratch3BodyBlocks {
             console.warn('Android: Electron API not available.');
             return Promise.resolve();
         }
-        console.log('🚀 Android: Starting server and waiting for a phone to connect...');
-        console.log('💡 Tip: Start the Android app and connect to this computer.');
+        // console.log('🚀 Android: Starting server and waiting for a phone to connect...');
+        // console.log('💡 Tip: Start the Android app and connect to this computer.');
 
         // 1. Tell the main process to start the server.
         // This is "fire-and-forget"; we don't need to wait for the result here.
-        this.runtime.electronAPI.startPoseServer();
+        window.electronAPI.startPoseServer();
 
         // 2. Return a new Promise. Scratch will pause the script here.
         return new Promise(resolve => {
-            // 3. Use the dedicated one-time listener we created in preload.js.
-            this.runtime.electronAPI.onPoseClientConnected(() => {
-                console.log('✅ Android: Phone connected! Resuming Scratch script.');
+            // 3. Use the dedicated one-time listener in preload.js.
+            window.electronAPI.onPoseClientConnected(() => {
+                // console.log('✅ Android: Phone connected! Resuming Scratch script.');
 
                 // 4. When the main process tells us a client has connected,
                 // we resolve the promise. This tells the Scratch VM to continue.
@@ -517,7 +525,7 @@ class Scratch3BodyBlocks {
             id: 'bodyblocks',
             name: formatMessage({
                 id: 'bodyblocks.categoryName',
-                default: 'Body Poses',
+                default: 'Body Blocks', 
                 description: 'Human body pose detection for Kinect and Android'
             }),
             menuIconURI: _menuIconURI,
@@ -540,14 +548,14 @@ class Scratch3BodyBlocks {
                         DEVICE: { type: ArgumentType.STRING, menu: 'devices', defaultValue: 'phone' }
                     }
                 },
-                {
-                    opcode: 'startConnectionAndWait',
-                    blockType: BlockType.COMMAND,
-                    text: 'start [DEVICE] connection and wait',
-                    arguments: {
-                        DEVICE: { type: ArgumentType.STRING, menu: 'devices', defaultValue: 'phone' }
-                    }
-                },
+                // {
+                //     opcode: 'startConnectionAndWait',
+                //     blockType: BlockType.COMMAND,
+                //     text: 'start [DEVICE] connection and wait',
+                //     arguments: {
+                //         DEVICE: { type: ArgumentType.STRING, menu: 'devices', defaultValue: 'phone' }
+                //     }
+                // },
                 {
                     opcode: 'stopConnection',
                     blockType: BlockType.COMMAND,
@@ -628,13 +636,37 @@ class Scratch3BodyBlocks {
                     }
                 },
                 {
-                    opcode: 'setSkeletonColor',
+                    opcode: 'setSkeletonColorToColor',
                     blockType: BlockType.COMMAND,
                     text: 'set skeleton color to [COLOR]',
                     arguments: {
                         COLOR: {
                             type: ArgumentType.COLOR
                         }
+                    }
+                },
+                {
+                    opcode: 'showSkeleton',
+                    blockType: BlockType.COMMAND,
+                    text: 'show skeleton [STATE]',
+                    arguments: {
+                        STATE: { type: ArgumentType.STRING, menu: 'onOff', defaultValue: 'on' }
+                    }
+                },
+                {
+                    opcode: 'setSkeletonThickness',
+                    blockType: BlockType.COMMAND,
+                    text: 'set skeleton thickness to [THICKNESS]',
+                    arguments: {
+                        THICKNESS: { type: ArgumentType.NUMBER, defaultValue: 4 }
+                    }
+                },                
+                {
+                    opcode: 'setSkeletonHead',
+                    blockType: BlockType.COMMAND,
+                    text: 'draw skeleton head [STATE]',
+                    arguments: {
+                        STATE: { type: ArgumentType.STRING, menu: 'onOff', defaultValue: 'on' }
                     }
                 },
                 {
@@ -725,6 +757,14 @@ class Scratch3BodyBlocks {
                         { text: 'Ankle', value: 'Ankle' },
                         { text: 'Foot', value: 'Foot' }
                     ]
+                },
+                colorParam: {
+                    acceptReporters: true,
+                    items: ['color', 'saturation', 'brightness', 'transparency']
+                },
+                onOff: {
+                   acceptReporters: true,
+                    items: ['on', 'off']
                 }
             }
         };
@@ -757,16 +797,16 @@ class Scratch3BodyBlocks {
         // console.log('getValue - electronAPI exists:', typeof window.electronAPI);
         // console.log('getValue - runtime electronAPI:', typeof this.runtime.electronAPI);
 
-        console.log(`🚀 Starting ${args.DEVICE} connection and waiting...`);
-        console.log('💡 Press the red stop button to cancel if needed');
+        // console.log(`🚀 Starting ${args.DEVICE} connection and waiting...`);
+        // console.log('💡 Press the red stop button to cancel if needed');
 
         try {
             if (args.DEVICE === 'phone') {
                 await this.startAndroidServerAndWait();
-                console.log('🎉 Phone connection ready! Script will continue.');
+                // console.log('🎉 Phone connection ready! Script will continue.');
             } else if (args.DEVICE === 'kinect') {
                 await this.connectKinectAndWait();
-                console.log('🎉 Kinect connection ready! Script will continue.');
+                // console.log('🎉 Kinect connection ready! Script will continue.');
             } else {
                 console.error(`❌ Unknown device: ${args.DEVICE}`);
                 return; // Don't throw error for unknown device, just continue
@@ -774,7 +814,7 @@ class Scratch3BodyBlocks {
         } catch (error) {
             // Only server startup errors should reach here (not connection timeouts)
             console.error(`❌ Failed to start ${args.DEVICE} server:`, error.message);
-            console.log('💡 Check the console for details, then try again');
+            // console.log('💡 Check the console for details, then try again');
             // Don't re-throw - let user try again rather than breaking script
         }
     }
@@ -941,40 +981,75 @@ class Scratch3BodyBlocks {
      * 
      */
     drawSkeleton (args) {
+           const w = 480; // The fixed width of our drawing canvas
+        const h = 360; // The fixed height of our drawing canvas
+
+        // Always clear the canvas at the start of every frame.
+        this.skeletonCtx.clearRect(0, 0, w, h);
+
+        // If the skeleton is turned off, we're done for this frame.
+        if (!this.isSkeletonVisible)
+            return;
+
         const personIndex = this._personIndexCache[args.INDEX] || 0;
         const body = this.bodies[personIndex];
 
-        const w = 480; // The fixed width of our drawing canvas
-        const h = 360; // The fixed height of our drawing canvas
-
-        this.skeletonCtx.clearRect(0, 0, w, h);
-
-        if (!body || !body.Head) {
-            return; // Stop if no data
-        }
+        // If no data for this person, stop.
+        if (!body || !body.Head) 
+            return;
         
         try {
-            // --- Draw the Head ---
-            const headX = body.Head[0] + w / 2;
-            const headY = -body.Head[1] + h / 2;
+            // --- 1. Set up the drawing styles from your class properties ---
+            // Convert the stored HSV-like values to an RGB object
+            const rgb = Color.hsvToRgb({
+                h: this.skeletonColor * 3.6, // Convert 0-100 to 0-360
+                s: this.skeletonSaturation / 100,
+                v: this.skeletonBrightness / 100
+            });
 
-            this.skeletonCtx.fillStyle = this.skeletonColor;
-            this.skeletonCtx.strokeStyle = this.skeletonColor;
+            // // Calculate the alpha from transparency
+            // const alpha = 1 - (this.skeletonTransparency / 100);
 
-            this.skeletonCtx.beginPath();
-            this.skeletonCtx.arc(headX, headY, 20, 0, Math.PI * 2);
-            this.skeletonCtx.fill();
+            // Create the final rgba string for the canvas
+            const color = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.8)`;
 
-            // --- Draw the Skeleton Bones ---            
-            // Set a fixed line width that looks good on the 480x360 canvas
-            this.skeletonCtx.lineWidth = 4;
+            // Use this color for all drawing
+            this.skeletonCtx.fillStyle = color;            
+            this.skeletonCtx.strokeStyle = color;
+
+            // Use the line width from the class property.
+            this.skeletonCtx.lineWidth = this.skeletonLineWidth;
+
+            // --- 2. Draw the Head (if it's enabled) ---
+            if (this.isHeadVisible && body.Neck) { // Also check if Neck data exists
+                const headCoords = body.Head;
+                const neckCoords = body.Neck;
+
+                // Calculate the radius as the distance between the Head and Neck joints
+                const dx = headCoords[0] - neckCoords[0];
+                const dy = headCoords[1] - neckCoords[1];
+                const radius = Math.sqrt((dx * dx) + (dy * dy));
+
+                // Get the screen coordinates for the head's center
+                const headX = headCoords[0] + w / 2;
+                const headY = -headCoords[1] + h / 2;
+
+                // Draw the circle with the calculated radius
+                this.skeletonCtx.fillStyle = color;
+                this.skeletonCtx.beginPath();
+                this.skeletonCtx.arc(headX, headY, radius, 0, Math.PI * 2);
+                //this.skeletonCtx.fill(); // I think a circle outline is better than filled, but you can easily switch this back, comment this line in and the next line out.
+                this.skeletonCtx.stroke();
+            }
+
+            // --- 3. Draw the Skeleton Bones ---
+            this.skeletonCtx.strokeStyle = color; // Use the dynamic color
             
             const drawBone = (jointName1, jointName2) => {
                 const joint1 = body[jointName1];
                 const joint2 = body[jointName2];
                 
                 if (joint1 && joint2) {
-                    // The coordinate math no longer multiplies by `scale`
                     const x1 = joint1[0] + w / 2;
                     const y1 = -joint1[1] + h / 2;
                     const x2 = joint2[0] + w / 2;
@@ -986,9 +1061,12 @@ class Scratch3BodyBlocks {
                     this.skeletonCtx.stroke();
                 }
             };
+        
             // --- Draw the skeleton by connecting the "bones" ---
+            
+            if(!this.isHeadVisible) drawBone('Head', 'Neck'); 
+
             // Spine
-            drawBone('Head', 'Neck'); 
             drawBone('Neck', 'SpineShoulder');
             drawBone('SpineShoulder', 'SpineMid');
             drawBone('SpineMid', 'SpineBase');
@@ -1025,18 +1103,34 @@ class Scratch3BodyBlocks {
         } catch (e) {
             console.error("Error during skeleton draw:", e);
         }                
+    } 
+
+    // Add this method to your extension class
+    setSkeletonColorToColor (args) {
+        // Convert the color from the picker into an RGB object
+        const rgb = Cast.toRgbColorObject(args.COLOR);
+        
+        // Convert the RGB object to the HSV color model
+        const hsv = Color.rgbToHsv(rgb);
+
+        // Update the extension's internal state with the new values
+        this.skeletonColor = (hsv.h / 360) * 100;
+        this.skeletonSaturation = hsv.s * 100;
+        this.skeletonBrightness = hsv.v * 100;
     }
 
-    setSkeletonColor(args) {
-        // The color argument comes in as a hex string, e.g., '#00ff00'
-        // We need to convert it to an rgba string to include transparency.
-        const hex = args.COLOR.replace('#', '');
-        const r = parseInt(hex.substring(0, 2), 16);
-        const g = parseInt(hex.substring(2, 4), 16);
-        const b = parseInt(hex.substring(4, 6), 16);
+    showSkeleton(args) {
+        this.isSkeletonVisible = (args.STATE === 'on');
+    }
 
-        // We'll keep the transparency fixed at 0.8 for now.
-        this.skeletonColor = `rgba(${r}, ${g}, ${b}, 0.8)`;
+    setSkeletonThickness(args) {
+        // Clamp the value to a reasonable range
+        const thickness = Math.max(1, Math.min(args.THICKNESS, 20));
+        this.skeletonLineWidth = thickness;
+    }    
+
+    setSkeletonHead(args) {
+        this.isHeadVisible = (args.STATE === 'on');
     }
 
     getServerIpAddress() {
