@@ -1142,7 +1142,7 @@ class Scratch3BodyBlocks {
         // Return a Promise that resolves with the IP address
         return window.electronAPI.getAppInfo().then(info => {
             if (info && info.ipAddress) {
-                return `${info.ipAddress}:8183`; // Append the port number
+                return `${info.ipAddress}`; // Removing the port number
             }
             return 'not available';
         }).catch(() => {
